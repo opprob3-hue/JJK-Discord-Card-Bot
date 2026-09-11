@@ -1,15 +1,16 @@
-# [Project name]
+# JJK Discord Card Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An always-on Discord bot that lets servers collect, inspect, and rank Jujutsu Kaisen character cards.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server and Discord bot
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL`, `DISCORD_BOT_TOKEN`
+- Optional env: `DISCORD_GUILD_ID` — register commands to one server for faster iteration instead of globally
 
 ## Stack
 
@@ -18,27 +19,39 @@ _Replace the heading above with the project's name, and this line with one sente
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Build: esbuild (ESM bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/api-server/src/discord/cards.ts` — source of truth for the JJK card set
+- `artifacts/api-server/src/discord/bot.ts` — Discord client, slash commands, pull rates, and embeds
+- `lib/db/src/schema/index.ts` — persistent player and collection tables
+- `artifacts/api-server/src/index.ts` — API and Discord bot startup
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Discord slash commands are registered globally by default; set `DISCORD_GUILD_ID` for instant server-local registration while developing.
+- Cards remain source-controlled static content while player ownership and pull counts are stored in PostgreSQL.
+- The bot only requests the `Guilds` gateway intent because all interaction is handled through slash commands.
+- Pulls use weighted rarity selection: Epic 75%, Legendary 20%, Mythic 5%.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- `/pull` awards a weighted-random card with a 30-second per-user cooldown.
+- `/collection` shows unique cards, duplicate counts, and completion progress.
+- `/card` provides autocomplete and a stat embed for every card.
+- `/profile` shows pulls and collection totals for any player.
+- `/leaderboard` ranks collectors by total cards.
+- `/help` explains the bot in Discord.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The initial collection is the Jujutsu Kaisen card data supplied by the user.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Global Discord slash-command registration can take time to appear in every server. Use `DISCORD_GUILD_ID` during development if immediate command visibility is needed.
+- Keep `DISCORD_BOT_TOKEN` in Replit Secrets; never put it in source control or logs.
 
 ## Pointers
 

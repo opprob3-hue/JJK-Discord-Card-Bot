@@ -1,0 +1,1 @@
+- [Monorepo package installation](package-install-monorepo.md) — package-scoped dependencies may require a filtered pnpm add when the installer targets the workspace root.
