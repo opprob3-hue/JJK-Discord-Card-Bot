@@ -24,29 +24,34 @@ An always-on Discord bot that lets servers collect, inspect, and rank Jujutsu Ka
 ## Where things live
 
 - `artifacts/api-server/src/discord/cards.ts` — source of truth for the JJK card set
-- `artifacts/api-server/src/discord/bot.ts` — Discord client, slash commands, pull rates, and embeds
-- `lib/db/src/schema/index.ts` — persistent player and collection tables
+- `artifacts/api-server/src/discord/bot.ts` — Discord client, slash commands, buttons, select menus, and embeds
+- `lib/db/src/schema/index.ts` — persistent players, wallets, rewards, battles, and collections
 - `artifacts/api-server/src/index.ts` — API and Discord bot startup
 
 ## Architecture decisions
 
 - Discord slash commands are registered globally by default; set `DISCORD_GUILD_ID` for instant server-local registration while developing.
-- Cards remain source-controlled static content while player ownership and pull counts are stored in PostgreSQL.
+- Cards remain source-controlled static content while player ownership, wallets, rewards, battles, and pull counts are stored in PostgreSQL.
 - The bot only requests the `Guilds` gateway intent because all interaction is handled through slash commands.
-- Pulls use weighted rarity selection: Epic 75%, Legendary 20%, Mythic 5%.
+- Normal pulls use weighted rarity selection: Epic 75%, Legendary 20%, Mythic 5%. The Common crate keeps the supplied 75/34/1 weights as normalized relative weights because those values total 110%.
 
 ## Product
 
 - `/pull` awards a weighted-random card with a 30-second per-user cooldown.
+- `/start` registers a player once, grants starting coins, and grants a one-time starter pack.
+- `/pack`, `/shop_spins`, `/balance`, `/daily`, `/claim_spin_normal`, `/hourly_claim_spin_normal`, and `/sell_card` manage the economy.
 - `/collection` shows unique cards, duplicate counts, and completion progress.
 - `/card` provides autocomplete and a stat embed for every card.
-- `/profile` shows pulls and collection totals for any player.
-- `/leaderboard` ranks collectors by total cards.
+- `/battle` uses accept/decline buttons and per-player card select menus.
+- `/trade` uses accept/decline buttons, card select menus, quantity modals, and two-party confirmation.
+- `/profile` shows wallet, pull, collection, reward, and battle totals for any player.
+- `/leaderboard` ranks players by battle wins, collection value, then highest card power.
 - `/help` explains the bot in Discord.
 
 ## User preferences
 
 - The initial collection is the Jujutsu Kaisen card data supplied by the user.
+- Additional anime sets can be added through `CARD_SETS` without changing the command flow.
 
 ## Gotchas
 

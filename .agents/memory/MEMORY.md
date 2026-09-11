@@ -1,1 +1,2 @@
 - [Monorepo package installation](package-install-monorepo.md) — package-scoped dependencies may require a filtered pnpm add when the installer targets the workspace root.
+- [Crate weight decision](crate-weight-decision.md) — the supplied Common crate odds are treated as relative weights because they total 110%.

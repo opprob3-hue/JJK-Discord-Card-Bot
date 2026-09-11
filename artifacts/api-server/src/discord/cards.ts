@@ -1,6 +1,13 @@
-export type CardRarity = "Mythic" | "Legendary" | "Epic";
+export type CardRarity =
+  | "Common"
+  | "Uncommon"
+  | "Rare"
+  | "Epic"
+  | "Legendary"
+  | "Mythic"
+  | "Divine";
 
-export type JjkCard = {
+export type AnimeCard = {
   id: string;
   name: string;
   anime: string;
@@ -12,6 +19,8 @@ export type JjkCard = {
   ability: string;
   image_url: string;
 };
+
+export type JjkCard = AnimeCard;
 
 export const JJK_CARDS: JjkCard[] = [
   {
@@ -149,3 +158,8 @@ export const JJK_CARDS: JjkCard[] = [
     image_url: "https://i.ibb.co/zzMHn0M/images-68.jpg",
   },
 ];
+
+// New anime sets can be added here without changing command or database code.
+export const CARD_SETS: Record<string, AnimeCard[]> = {
+  jjk: JJK_CARDS,
+};
