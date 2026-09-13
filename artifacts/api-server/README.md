@@ -1,6 +1,8 @@
-# JJK Discord Card Bot
+# Anime Discord Card Bot
 
 This service runs the Discord bot alongside the health-check API.
+
+The active pool contains 23 cards: 11 Jujutsu Kaisen cards and 12 Bleach cards.
 
 ## Commands
 

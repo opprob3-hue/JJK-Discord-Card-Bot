@@ -42,8 +42,8 @@ import {
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import {
+  ALL_CARDS,
   CARD_SETS,
-  JJK_CARDS,
   type CardRarity,
   type JjkCard,
 } from "./cards";
@@ -241,7 +241,7 @@ const sleep = (durationMs: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, durationMs));
 
 function allCards(): JjkCard[] {
-  return Object.values(CARD_SETS).flat();
+  return ALL_CARDS;
 }
 
 function cardForId(cardId: string): JjkCard | undefined {
@@ -263,7 +263,7 @@ function rarityValue(rarity: CardRarity): number {
 }
 
 function chooseCard(
-  cards: JjkCard[] = JJK_CARDS,
+  cards: JjkCard[] = ALL_CARDS,
   weights: Array<{ rarity: CardRarity; weight: number }> = NORMAL_RARITY_WEIGHTS,
 ): JjkCard {
   const totalWeight = weights.reduce((sum, entry) => sum + entry.weight, 0);
@@ -470,7 +470,7 @@ function collectionEmbed(
     .addFields(
       { name: "Unique cards", value: `${rows.length}`, inline: true },
       { name: "Total cards", value: `${totalCards}`, inline: true },
-      { name: "Completion", value: `${rows.length}/${JJK_CARDS.length}`, inline: true },
+      { name: "Completion", value: `${rows.length}/${ALL_CARDS.length}`, inline: true },
     )
     .setFooter({ text: `Page ${safePage + 1}/${pageCount} · Use /card to inspect a card.` });
 }
@@ -858,7 +858,7 @@ async function handleShopPurchase(
   };
   const selected = config[tier];
   const cards = Array.from({ length: selected.count }, () =>
-    chooseCard(JJK_CARDS, CRATE_WEIGHTS[tier]),
+    chooseCard(ALL_CARDS, CRATE_WEIGHTS[tier]),
   );
   const remainingCoins = await purchaseCards(interaction.user.id, cards, selected.cost);
   if (remainingCoins === undefined) {
@@ -1026,7 +1026,7 @@ function battleSelectRow(
     .setCustomId(`battle-select:${state.id}:${userId}`)
     .setPlaceholder(placeholder)
     .addOptions(
-      JJK_CARDS.map((card) => ({
+      ALL_CARDS.map((card) => ({
         label: `${card.name} · ${card.rarity}`,
         value: card.id,
       })),
@@ -1124,8 +1124,7 @@ async function handleBattleButton(interaction: ButtonInteraction, action: string
     await interaction.reply({ content: "This battle is already active.", ephemeral: true });
     return;
   }
-  if (!(await ownsCard(state.challengerId, JJK_CARDS[0]!.id)) &&
-      (await ownedCards(state.challengerId)).length === 0) {
+  if ((await ownedCards(state.challengerId)).length === 0) {
     await interaction.reply({ content: "The challenger has no cards to battle with.", ephemeral: true });
     return;
   }

@@ -1,6 +1,6 @@
-# JJK Discord Card Bot
+# Anime Discord Card Bot
 
-An always-on Discord bot that lets servers collect, inspect, and rank Jujutsu Kaisen character cards.
+An always-on Discord bot that lets servers collect, inspect, battle, trade, and rank anime character cards.
 
 ## Run & Operate
 
@@ -23,7 +23,7 @@ An always-on Discord bot that lets servers collect, inspect, and rank Jujutsu Ka
 
 ## Where things live
 
-- `artifacts/api-server/src/discord/cards.ts` — source of truth for the JJK card set
+- `artifacts/api-server/src/discord/cards.ts` — source of truth for the JJK, Bleach, and future card sets
 - `artifacts/api-server/src/discord/bot.ts` — Discord client, slash commands, buttons, select menus, and embeds
 - `lib/db/src/schema/index.ts` — persistent players, wallets, rewards, battles, and collections
 - `artifacts/api-server/src/index.ts` — API and Discord bot startup
@@ -50,8 +50,9 @@ An always-on Discord bot that lets servers collect, inspect, and rank Jujutsu Ka
 
 ## User preferences
 
-- The initial collection is the Jujutsu Kaisen card data supplied by the user.
-- Additional anime sets can be added through `CARD_SETS` without changing the command flow.
+- The active card pool contains 11 Jujutsu Kaisen cards and 12 Bleach cards.
+- `ALL_CARDS` is the combined pool used by packs, card lookup, collection completion, shop crates, and battles.
+- Additional anime sets can be added to the card catalog without changing the command flow.
 
 ## Gotchas
 
