@@ -15,6 +15,7 @@ export const jjkPlayers = pgTable("jjk_players", {
   battleWins: integer("battle_wins").notNull().default(0),
   battleLosses: integer("battle_losses").notNull().default(0),
   normalSpins: integer("normal_spins").notNull().default(0),
+  summonCount: integer("summon_count").notNull().default(0),
   starterPackClaimed: boolean("starter_pack_claimed").notNull().default(false),
   lastDailyAt: timestamp("last_daily_at", { withTimezone: true }),
   lastNormalSpinClaimAt: timestamp("last_normal_spin_claim_at", {

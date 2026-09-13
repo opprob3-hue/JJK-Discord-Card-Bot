@@ -44,6 +44,7 @@ import {
 import { logger } from "../lib/logger";
 import {
   ALL_CARDS,
+  BLEACH_CARDS,
   CARD_SETS,
   type CardRarity,
   type JjkCard,
@@ -51,18 +52,15 @@ import {
 
 const STARTING_COINS = 100;
 const STARTER_CARD_COUNT = 3;
-const DAILY_REWARD = 50;
+const DAILY_REWARD = 30;
 const NORMAL_SPIN_REWARD = 20;
 const HOURLY_SPIN_REWARD = 5;
 const NORMAL_SPINS_PER_CLAIM = 10;
 const HOURLY_SPINS_PER_CLAIM = 1;
 const BATTLE_REWARD = 25;
 const PACK_COST = 10;
-const PULL_COOLDOWN_MS = 30_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-
-const pullCooldowns = new Map<string, number>();
 
 const RARITY_COLORS: Record<CardRarity, number> = {
   Common: 0x94a3b8,
@@ -95,9 +93,10 @@ const SELL_VALUES: Record<CardRarity, number> = {
 };
 
 const NORMAL_RARITY_WEIGHTS: Array<{ rarity: CardRarity; weight: number }> = [
-  { rarity: "Epic", weight: 75 },
+  { rarity: "Epic", weight: 74 },
   { rarity: "Legendary", weight: 20 },
   { rarity: "Mythic", weight: 5 },
+  { rarity: "Divine", weight: 1 },
 ];
 
 const CRATE_WEIGHTS = {
@@ -107,22 +106,66 @@ const CRATE_WEIGHTS = {
     { rarity: "Mythic", weight: 1 },
   ],
   super: [
-    { rarity: "Epic", weight: 40 },
-    { rarity: "Legendary", weight: 50 },
+    { rarity: "Epic", weight: 50 },
+    { rarity: "Legendary", weight: 35 },
     { rarity: "Mythic", weight: 10 },
+    { rarity: "Divine", weight: 5 },
   ],
   divine: [
-    { rarity: "Epic", weight: 25 },
-    { rarity: "Legendary", weight: 50 },
-    { rarity: "Mythic", weight: 25 },
+    { rarity: "Epic", weight: 30 },
+    { rarity: "Legendary", weight: 40 },
+    { rarity: "Mythic", weight: 20 },
+    { rarity: "Divine", weight: 10 },
   ],
-  serpent: [{ rarity: "Mythic", weight: 100 }],
+  serpent: [
+    { rarity: "Mythic", weight: 75 },
+    { rarity: "Divine", weight: 35 },
+  ],
+  tybw: [
+    { rarity: "Legendary", weight: 50 },
+    { rarity: "Mythic", weight: 35 },
+    { rarity: "Divine", weight: 15 },
+  ],
+  celestial: [
+    { rarity: "Mythic", weight: 40 },
+    { rarity: "Divine", weight: 60 },
+  ],
 } satisfies Record<
   string,
   Array<{ rarity: CardRarity; weight: number }>
 >;
 
 type PackTier = keyof typeof CRATE_WEIGHTS;
+type GenerateSourceRarity = "Epic" | "Legendary" | "Mythic";
+type PityReward = {
+  threshold: number;
+  rarity: "Legendary" | "Mythic" | "Divine";
+  label: string;
+};
+
+const PITY_REWARDS: PityReward[] = [
+  { threshold: 10, rarity: "Legendary", label: "Legendary" },
+  { threshold: 20, rarity: "Mythic", label: "Mythic" },
+  { threshold: 50, rarity: "Divine", label: "Divine" },
+];
+
+const CRATE_CARD_POOLS: Record<PackTier, JjkCard[]> = {
+  common: ALL_CARDS,
+  super: ALL_CARDS,
+  divine: ALL_CARDS,
+  serpent: ALL_CARDS,
+  tybw: BLEACH_CARDS,
+  celestial: ALL_CARDS,
+};
+
+const GENERATION_RULES: Record<
+  GenerateSourceRarity,
+  { required: number; target: "Legendary" | "Mythic" | "Divine" }
+> = {
+  Epic: { required: 4, target: "Legendary" },
+  Legendary: { required: 3, target: "Mythic" },
+  Mythic: { required: 6, target: "Divine" },
+};
 type PlayerRow = JjkPlayer;
 type CardRow = JjkPlayerCard;
 type DbTransaction = Parameters<typeof db.transaction>[0] extends (
@@ -162,14 +205,14 @@ const commandData = [
     .setName("start")
     .setDescription("Register your player and receive your starter pack"),
   new SlashCommandBuilder()
-    .setName("pull")
-    .setDescription("Pull a free cooldown card"),
+    .setName("summon")
+    .setDescription("Summon a card using one normal spin"),
   new SlashCommandBuilder()
     .setName("pack")
-    .setDescription("Open a paid random JJK card pack"),
+    .setDescription("Open a paid random card pack"),
   new SlashCommandBuilder()
     .setName("collection")
-    .setDescription("View your JJK card collection"),
+    .setDescription("View your anime card collection"),
   new SlashCommandBuilder()
     .setName("card")
     .setDescription("Inspect a card, whether or not you own it")
@@ -202,7 +245,7 @@ const commandData = [
     .setDescription("View your Anime Coins and spin balance"),
   new SlashCommandBuilder()
     .setName("daily")
-    .setDescription("Claim your daily Anime Coin reward"),
+    .setDescription("Claim 30 Anime Coins once per day"),
   new SlashCommandBuilder()
     .setName("claim_spin_normal")
     .setDescription("Claim 20 coins and 10 normal spins every day"),
@@ -212,6 +255,20 @@ const commandData = [
   new SlashCommandBuilder()
     .setName("shop_spins")
     .setDescription("Buy card crates with Anime Coins"),
+  new SlashCommandBuilder()
+    .setName("generate")
+    .setDescription("Combine duplicate cards into a higher-rarity card")
+    .addStringOption((option) =>
+      option
+        .setName("rarity")
+        .setDescription("Rarity of the cards to combine")
+        .setRequired(true)
+        .addChoices(
+          { name: "4 Epic → 1 Legendary", value: "Epic" },
+          { name: "3 Legendary → 1 Mythic", value: "Legendary" },
+          { name: "6 Mythic → 1 Divine", value: "Mythic" },
+        ),
+    ),
   new SlashCommandBuilder()
     .setName("battle")
     .setDescription("Challenge another registered player")
@@ -534,18 +591,75 @@ function collectionComponents(
     : [];
 }
 
-async function saveFreePull(
+function pityRewardsForCount(summonCount: number): PityReward[] {
+  return PITY_REWARDS.filter(
+    (reward) => summonCount > 0 && summonCount % reward.threshold === 0,
+  );
+}
+
+function pityProgressText(summonCount: number): string {
+  return PITY_REWARDS.map((reward) => {
+    const progress = summonCount % reward.threshold;
+    return `${reward.label} ${progress}/${reward.threshold}`;
+  }).join(" · ");
+}
+
+function randomCardOfRarity(
+  rarity: CardRarity,
+  cards: JjkCard[] = ALL_CARDS,
+): JjkCard {
+  return chooseCard(cards.filter((card) => card.rarity === rarity), [
+    { rarity, weight: 1 },
+  ]);
+}
+
+async function performSummon(
   discordUserId: string,
-  username: string,
-  card: JjkCard,
-): Promise<void> {
-  await ensurePlayer(discordUserId, username);
-  await db.transaction(async (tx) => {
-    await tx
+): Promise<
+  | {
+      card: JjkCard;
+      pityCards: Array<{ card: JjkCard; reward: PityReward }>;
+      normalSpins: number;
+      summonCount: number;
+    }
+  | undefined
+> {
+  const card = chooseCard();
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
       .update(jjkPlayers)
-      .set({ pulls: sql`${jjkPlayers.pulls} + 1`, updatedAt: new Date() })
-      .where(eq(jjkPlayers.discordUserId, discordUserId));
+      .set({
+        normalSpins: sql`${jjkPlayers.normalSpins} - 1`,
+        pulls: sql`${jjkPlayers.pulls} + 1`,
+        summonCount: sql`${jjkPlayers.summonCount} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(jjkPlayers.discordUserId, discordUserId),
+          gte(jjkPlayers.normalSpins, 1),
+        ),
+      )
+      .returning({
+        normalSpins: jjkPlayers.normalSpins,
+        summonCount: jjkPlayers.summonCount,
+      });
+    if (!updated) return undefined;
+
     await addCard(tx, discordUserId, card.id);
+    const pityCards = pityRewardsForCount(updated.summonCount).map((reward) => ({
+      card: randomCardOfRarity(reward.rarity),
+      reward,
+    }));
+    for (const pity of pityCards) {
+      await addCard(tx, discordUserId, pity.card.id);
+    }
+    return {
+      card,
+      pityCards,
+      normalSpins: updated.normalSpins,
+      summonCount: updated.summonCount,
+    };
   });
 }
 
@@ -591,31 +705,44 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
         )
         .addFields(
           { name: "Anime Coins", value: `${result.player.coins}`, inline: true },
-          { name: "Next step", value: "Use `/pack` or `/collection`.", inline: true },
+          { name: "Next step", value: "Use `/summon` or `/collection`.", inline: true },
         ),
     ],
   });
 }
 
-async function handlePull(interaction: ChatInputCommandInteraction) {
-  const now = Date.now();
-  const lastPull = pullCooldowns.get(interaction.user.id) ?? 0;
-  const remainingMs = PULL_COOLDOWN_MS - (now - lastPull);
-  if (remainingMs > 0) {
+async function handleSummon(interaction: ChatInputCommandInteraction) {
+  const player = await requirePlayer(interaction);
+  if (!player) return;
+  const result = await performSummon(interaction.user.id);
+  if (!result) {
     await interaction.reply({
-      content: `Your cursed energy is recovering. Try again in ${Math.ceil(remainingMs / 1000)}s.`,
+      content:
+        "You do not have any normal spins. Use `/claim_spin_normal` daily or `/hourly_claim_spin_normal` each hour.",
       ephemeral: true,
     });
     return;
   }
-  const card = chooseCard();
-  pullCooldowns.set(interaction.user.id, now);
-  await saveFreePull(interaction.user.id, interaction.user.username, card);
-  const media = await cardMedia(card);
+
+  const media = await Promise.all([
+    cardMedia(result.card, "✨ SUMMON RESULT", undefined, 0),
+    ...result.pityCards.map(({ card, reward }, index) =>
+      cardMedia(
+        card,
+        `🎁 ${reward.label.toUpperCase()} PITY REWARD`,
+        `Granted after ${reward.threshold} summons.`,
+        index + 1,
+      ),
+    ),
+  ]);
+  const pityText =
+    result.pityCards.length > 0
+      ? `\n\nPity reward(s): ${result.pityCards.map(({ reward }) => reward.label).join(", ")}`
+      : "";
   await interaction.reply({
-    content: "You pulled a free cooldown card.",
-    embeds: [media.embed],
-    files: media.files,
+    content: `✨ Summon complete. Normal spins left: **${result.normalSpins}**.\nPity: ${pityProgressText(result.summonCount)}${pityText}`,
+    embeds: media.map(({ embed }) => embed),
+    files: media.flatMap(({ files }) => files),
   });
 }
 
@@ -740,6 +867,72 @@ async function handleSellCard(interaction: ChatInputCommandInteraction) {
   });
 }
 
+async function handleGenerate(interaction: ChatInputCommandInteraction) {
+  if (!(await requirePlayer(interaction))) return;
+  const sourceRarity = interaction.options.getString(
+    "rarity",
+    true,
+  ) as GenerateSourceRarity;
+  const rule = GENERATION_RULES[sourceRarity];
+  const rows = await ownedCards(interaction.user.id);
+  const sourceRows = rows.filter(
+    (row) => cardForId(row.cardId)?.rarity === sourceRarity,
+  );
+  const ownedCount = sourceRows.reduce((sum, row) => sum + row.quantity, 0);
+  if (ownedCount < rule.required) {
+    await interaction.reply({
+      content: `You need **${rule.required} ${sourceRarity} cards** to generate one ${rule.target}. You currently have ${ownedCount}.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const generatedCard = randomCardOfRarity(rule.target);
+  await db.transaction(async (tx) => {
+    let remaining = rule.required;
+    for (const row of sourceRows) {
+      if (remaining <= 0) break;
+      const consumed = Math.min(row.quantity, remaining);
+      const removed = await tx
+        .update(jjkPlayerCards)
+        .set({
+          quantity: sql`${jjkPlayerCards.quantity} - ${consumed}`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(jjkPlayerCards.discordUserId, interaction.user.id),
+            eq(jjkPlayerCards.cardId, row.cardId),
+            gte(jjkPlayerCards.quantity, consumed),
+          ),
+        )
+        .returning({ quantity: jjkPlayerCards.quantity });
+      if (removed.length === 0) throw new Error("GENERATION_OWNERSHIP_CHANGED");
+      remaining -= consumed;
+    }
+    await tx
+      .delete(jjkPlayerCards)
+      .where(
+        and(
+          eq(jjkPlayerCards.discordUserId, interaction.user.id),
+          lte(jjkPlayerCards.quantity, 0),
+        ),
+      );
+    await addCard(tx, interaction.user.id, generatedCard.id);
+  });
+
+  const media = await cardMedia(
+    generatedCard,
+    `🔄 GENERATED ${generatedCard.rarity.toUpperCase()} CARD`,
+    `Consumed ${rule.required} ${sourceRarity} cards.`,
+  );
+  await interaction.reply({
+    content: `You generated **${generatedCard.name}**. This did not affect summon pity.`,
+    embeds: [media.embed],
+    files: media.files,
+  });
+}
+
 async function handleBalance(interaction: ChatInputCommandInteraction) {
   const player = await requirePlayer(interaction);
   if (!player) return;
@@ -752,7 +945,9 @@ async function handleBalance(interaction: ChatInputCommandInteraction) {
           { name: "Anime Coins", value: `${player.coins}`, inline: true },
           { name: "Normal spins", value: `${player.normalSpins}`, inline: true },
         )
-        .setFooter({ text: "Use /shop_spins to buy crates." }),
+        .setFooter({
+          text: `Summon pity: ${pityProgressText(player.summonCount)} · Use /summon to draw.`,
+        }),
     ],
   });
 }
@@ -851,6 +1046,16 @@ function shopComponents(): ActionRowBuilder<ButtonBuilder>[] {
         .setLabel("Serpent · 100 coins · 1 Mythic")
         .setStyle(ButtonStyle.Danger),
     ]),
+    buttonRow([
+      new ButtonBuilder()
+        .setCustomId("shop:tybw")
+        .setLabel("TYBW · 150 coins · Bleach only")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("shop:celestial")
+        .setLabel("Celestial · 250 coins · Mythic/Divine")
+        .setStyle(ButtonStyle.Danger),
+    ]),
   ];
 }
 
@@ -862,19 +1067,27 @@ function shopEmbed(): EmbedBuilder {
     .addFields(
       {
         name: "Common Crate · 10 coins",
-        value: "5 cards · Epic 75% · Legendary 34% · Mythic 1% (normalized weights)",
+        value: "5 cards · Epic 75% · Legendary 34% · Mythic 1% (normalized weights; no Divine)",
       },
       {
         name: "Super Crate · 30 coins",
-        value: "5 cards · Epic 40% · Legendary 50% · Mythic 10%",
+        value: "5 cards · Epic 50% · Legendary 35% · Mythic 10% · Divine 5%",
       },
       {
         name: "Divine Crate · 50 coins",
-        value: "3 cards · Epic 25% · Legendary 50% · Mythic 25%",
+        value: "3 cards · Epic 30% · Legendary 40% · Mythic 20% · Divine 10%",
       },
       {
         name: "Serpent Crate · 100 coins",
-        value: "1 card · 100% Mythic",
+        value: "1 card · Mythic 75% · Divine 35% (normalized weights)",
+      },
+      {
+        name: "TYBW Crate · 150 coins",
+        value: "Bleach only · Legendary 50% · Mythic 35% · Divine 15%",
+      },
+      {
+        name: "Celestial Crate · 250 coins",
+        value: "All cards · Mythic 40% · Divine 60%",
       },
     );
 }
@@ -894,10 +1107,12 @@ async function handleShopPurchase(
     super: { cost: 30, count: 5, label: "Super Crate" },
     divine: { cost: 50, count: 3, label: "Divine Crate" },
     serpent: { cost: 100, count: 1, label: "Serpent Crate" },
+    tybw: { cost: 150, count: 1, label: "TYBW Crate" },
+    celestial: { cost: 250, count: 1, label: "Celestial Crate" },
   };
   const selected = config[tier];
   const cards = Array.from({ length: selected.count }, () =>
-    chooseCard(ALL_CARDS, CRATE_WEIGHTS[tier]),
+    chooseCard(CRATE_CARD_POOLS[tier], CRATE_WEIGHTS[tier]),
   );
   const remainingCoins = await purchaseCards(interaction.user.id, cards, selected.cost);
   if (remainingCoins === undefined) {
@@ -936,12 +1151,13 @@ async function handleProfile(interaction: ChatInputCommandInteraction) {
     embeds: [
       new EmbedBuilder()
         .setColor(0x7c3aed)
-        .setTitle(`${target.username}'s Sorcerer Profile`)
+        .setTitle(`${target.username}'s Anime Card Profile`)
         .setThumbnail(target.displayAvatarURL())
         .addFields(
           { name: "Anime Coins", value: `${player.coins}`, inline: true },
           { name: "Pulls", value: `${player.pulls}`, inline: true },
           { name: "Normal spins", value: `${player.normalSpins}`, inline: true },
+          { name: "Summon pity", value: pityProgressText(player.summonCount), inline: false },
           { name: "Unique cards", value: `${cards.length}`, inline: true },
           { name: "Total cards", value: `${totalCards}`, inline: true },
           { name: "Battle record", value: `${player.battleWins}W / ${player.battleLosses}L`, inline: true },
@@ -1639,14 +1855,14 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setColor(0x7c3aed)
         .setTitle("🎴 Anime Card Game")
-        .setDescription("Collect Jujutsu Kaisen cards, trade duplicates, and battle other players.")
+        .setDescription("Collect anime cards, generate higher rarities, trade duplicates, and battle other players.")
         .addFields(
           { name: "Account", value: "`/start` · `/balance` · `/profile` · `/daily`", inline: false },
-          { name: "Cards", value: "`/pull` · `/pack` · `/collection` · `/card` · `/sell_card`", inline: false },
+          { name: "Cards", value: "`/summon` · `/pack` · `/collection` · `/card` · `/sell_card` · `/generate`", inline: false },
           { name: "Rewards", value: "`/claim_spin_normal` · `/hourly_claim_spin_normal` · `/shop_spins`", inline: false },
           { name: "Multiplayer", value: "`/battle @user` · `/trade @user` · `/leaderboard`", inline: false },
         )
-        .setFooter({ text: "Current set: 11 Jujutsu Kaisen cards." }),
+        .setFooter({ text: "Current pool: 23 Jujutsu Kaisen + Bleach cards." }),
     ],
   });
 }
@@ -1714,8 +1930,8 @@ export async function startDiscordBot(): Promise<Client> {
         case "start":
           await handleStart(interaction);
           break;
-        case "pull":
-          await handlePull(interaction);
+        case "summon":
+          await handleSummon(interaction);
           break;
         case "pack":
           await handlePack(interaction);
@@ -1743,6 +1959,9 @@ export async function startDiscordBot(): Promise<Client> {
           break;
         case "shop_spins":
           await handleShop(interaction);
+          break;
+        case "generate":
+          await handleGenerate(interaction);
           break;
         case "battle":
           await handleBattle(interaction);

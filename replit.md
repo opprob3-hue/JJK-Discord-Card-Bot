@@ -33,13 +33,15 @@ An always-on Discord bot that lets servers collect, inspect, battle, trade, and 
 - Discord slash commands are registered globally by default; set `DISCORD_GUILD_ID` for instant server-local registration while developing.
 - Cards remain source-controlled static content while player ownership, wallets, rewards, battles, and pull counts are stored in PostgreSQL.
 - The bot only requests the `Guilds` gateway intent because all interaction is handled through slash commands.
-- Normal pulls use weighted rarity selection: Epic 75%, Legendary 20%, Mythic 5%. The Common crate keeps the supplied 75/34/1 weights as normalized relative weights because those values total 110%.
+- Summons use weighted rarity selection: Epic 74%, Legendary 20%, Mythic 5%, Divine 1%. The Common and Serpent crate weights are preserved as normalized relative weights when their supplied values total more than 100%.
 
 ## Product
 
-- `/pull` awards a weighted-random card with a 30-second per-user cooldown.
+- `/summon` consumes one daily/hourly normal spin, awards a weighted-random card, and reports summon-only pity progress.
 - `/start` registers a player once, grants starting coins, and grants a one-time starter pack.
-- `/pack`, `/shop_spins`, `/balance`, `/daily`, `/claim_spin_normal`, `/hourly_claim_spin_normal`, and `/sell_card` manage the economy.
+- `/pack`, `/shop_spins`, `/balance`, `/daily`, `/claim_spin_normal`, `/hourly_claim_spin_normal`, `/sell_card`, and `/generate` manage the economy and duplicate conversion.
+- Summon pity grants Legendary at 10 summons, Mythic at 20 summons, and Divine at 50 summons. Crates and `/generate` do not advance pity.
+- `/shop_spins` includes Common, Super, Divine, Serpent, TYBW, and Celestial crates, with TYBW restricted to Bleach cards.
 - `/collection` shows unique cards, duplicate counts, and completion progress.
 - `/card` provides autocomplete and a stat embed for every card.
 - `/battle` uses accept/decline buttons and per-player card select menus.
