@@ -1,6 +1,7 @@
 import { randomUUID, randomInt } from "node:crypto";
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   Client,
@@ -320,6 +321,39 @@ function cardEmbed(card: JjkCard, title?: string, ownership?: string) {
     });
 }
 
+async function cardMedia(
+  card: JjkCard,
+  title?: string,
+  ownership?: string,
+  index = 0,
+): Promise<{ embed: EmbedBuilder; files: AttachmentBuilder[] }> {
+  const embed = cardEmbed(card, title, ownership);
+  try {
+    const response = await fetch(card.image_url, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const contentType = response.headers.get("content-type") ?? "";
+    const extension = contentType.includes("png")
+      ? "png"
+      : contentType.includes("gif")
+        ? "gif"
+        : contentType.includes("webp")
+          ? "webp"
+          : "jpg";
+    const filename = `card-${index}-${card.id}.${extension}`;
+    const image = Buffer.from(await response.arrayBuffer());
+    embed.setImage(`attachment://${filename}`);
+    return {
+      embed,
+      files: [new AttachmentBuilder(image, { name: filename })],
+    };
+  } catch (error) {
+    logger.warn({ err: error, cardId: card.id }, "Could not attach card image");
+    return { embed, files: [] };
+  }
+}
+
 function buttonRow(buttons: ButtonBuilder[]): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 }
@@ -577,9 +611,11 @@ async function handlePull(interaction: ChatInputCommandInteraction) {
   const card = chooseCard();
   pullCooldowns.set(interaction.user.id, now);
   await saveFreePull(interaction.user.id, interaction.user.username, card);
+  const media = await cardMedia(card);
   await interaction.reply({
     content: "You pulled a free cooldown card.",
-    embeds: [cardEmbed(card)],
+    embeds: [media.embed],
+    files: media.files,
   });
 }
 
@@ -596,9 +632,11 @@ async function handlePack(interaction: ChatInputCommandInteraction) {
     });
     return;
   }
+  const media = await cardMedia(card);
   await interaction.editReply({
     content: `🎴 Pack opened. You have **${remainingCoins} Anime Coins** left.`,
-    embeds: [cardEmbed(card)],
+    embeds: [media.embed],
+    files: media.files,
   });
 }
 
@@ -641,7 +679,8 @@ async function handleCard(interaction: ChatInputCommandInteraction) {
     owned && owned.quantity > 0
       ? `✅ You own **${owned.quantity}** copy/copies.`
       : "❌ You do not own this card yet.";
-  await interaction.reply({ embeds: [cardEmbed(card, undefined, ownership)] });
+  const media = await cardMedia(card, undefined, ownership);
+  await interaction.reply({ embeds: [media.embed], files: media.files });
 }
 
 async function handleSellCard(interaction: ChatInputCommandInteraction) {
@@ -868,11 +907,15 @@ async function handleShopPurchase(
     });
     return;
   }
+  const media = await Promise.all(
+    cards.map((card, index) =>
+      cardMedia(card, `🎴 Pull ${index + 1}: ${card.name.toUpperCase()}`, undefined, index),
+    ),
+  );
   await interaction.reply({
     content: `You opened the **${selected.label}**. Balance: **${remainingCoins} coins**.`,
-    embeds: cards.map((card, index) =>
-      cardEmbed(card, `🎴 Pull ${index + 1}: ${card.name.toUpperCase()}`),
-    ),
+    embeds: media.map(({ embed }) => embed),
+    files: media.flatMap(({ files }) => files),
     ephemeral: false,
   });
 }
@@ -1083,6 +1126,20 @@ async function finishBattle(
   const winnerText = winnerId
     ? `<@${winnerId}> wins and receives **${BATTLE_REWARD} Anime Coins**.`
     : "The battle is a draw. No coins are awarded.";
+  const media = await Promise.all([
+    cardMedia(
+      challengerCard,
+      `🎴 ${challengerCard.name.toUpperCase()} · ${challengerScore}`,
+      undefined,
+      0,
+    ),
+    cardMedia(
+      challengedCard,
+      `🎴 ${challengedCard.name.toUpperCase()} · ${challengedScore}`,
+      undefined,
+      1,
+    ),
+  ]);
   await interaction.update({
     content: winnerText,
     embeds: [
@@ -1092,9 +1149,9 @@ async function finishBattle(
         .setDescription(
           `${winnerText}\n\n**${challengerCard.name}**: ${challengerScore} points\n**${challengedCard.name}**: ${challengedScore} points`,
         ),
-      cardEmbed(challengerCard, `🎴 ${challengerCard.name.toUpperCase()} · ${challengerScore}`),
-      cardEmbed(challengedCard, `🎴 ${challengedCard.name.toUpperCase()} · ${challengedScore}`),
+      ...media.map(({ embed }) => embed),
     ],
+    files: media.flatMap(({ files }) => files),
     components: [],
   });
 }
