@@ -15,6 +15,7 @@ export const jjkPlayers = pgTable("jjk_players", {
   battleWins: integer("battle_wins").notNull().default(0),
   battleLosses: integer("battle_losses").notNull().default(0),
   normalSpins: integer("normal_spins").notNull().default(0),
+  fragmentOfSoul: integer("fragment_of_soul").notNull().default(0),
   summonCount: integer("summon_count").notNull().default(0),
   starterPackClaimed: boolean("starter_pack_claimed").notNull().default(false),
   lastDailyAt: timestamp("last_daily_at", { withTimezone: true }),
@@ -31,6 +32,24 @@ export const jjkPlayers = pgTable("jjk_players", {
     .notNull()
     .defaultNow(),
 });
+
+
+export const jjkDailyMissions = pgTable(
+  "jjk_daily_missions",
+  {
+    discordUserId: text("discord_user_id").notNull(),
+    missionDate: text("mission_date").notNull(),
+    messagesSent: integer("messages_sent").notNull().default(0),
+    voiceMinutes: integer("voice_minutes").notNull().default(0),
+    messagesClaimed: boolean("messages_claimed").notNull().default(false),
+    voiceClaimed: boolean("voice_claimed").notNull().default(false),
+    voiceStartedAt: timestamp("voice_started_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.discordUserId, table.missionDate] })],
+);
 
 export const jjkPlayerCards = pgTable(
   "jjk_player_cards",
