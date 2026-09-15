@@ -36,6 +36,7 @@ import {
 } from "drizzle-orm";
 import {
   db,
+  jjkDailyMissions,
   jjkPlayerCards,
   jjkPlayers,
   type JjkPlayer,
@@ -46,13 +47,15 @@ import {
   ALL_CARDS,
   BLEACH_CARDS,
   CARD_SETS,
+  CORE_CARDS,
   type CardRarity,
   type JjkCard,
 } from "./cards";
+import { CROSSOVER_BANNER, type BannerDefinition } from "./banners";
 
 const STARTING_COINS = 100;
 const STARTER_CARD_COUNT = 3;
-const DAILY_REWARD = 30;
+const DAILY_CLAIM_SPINS = 10;
 const NORMAL_SPIN_REWARD = 20;
 const HOURLY_SPIN_REWARD = 5;
 const NORMAL_SPINS_PER_CLAIM = 10;
@@ -61,6 +64,8 @@ const BATTLE_REWARD = 25;
 const PACK_COST = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const MISSION_MESSAGES_TARGET = 35;
+const MISSION_VOICE_TARGET_MINUTES = 10;
 
 const RARITY_COLORS: Record<CardRarity, number> = {
   Common: 0x94a3b8,
@@ -70,6 +75,7 @@ const RARITY_COLORS: Record<CardRarity, number> = {
   Legendary: 0xa855f7,
   Mythic: 0xf59e0b,
   Divine: 0xef4444,
+  Celestial: 0x8b5cf6,
 };
 
 const RARITY_SYMBOLS: Record<CardRarity, string> = {
@@ -80,6 +86,7 @@ const RARITY_SYMBOLS: Record<CardRarity, string> = {
   Legendary: "🟣",
   Mythic: "✨",
   Divine: "🔱",
+  Celestial: "🌌",
 };
 
 const SELL_VALUES: Record<CardRarity, number> = {
@@ -90,6 +97,7 @@ const SELL_VALUES: Record<CardRarity, number> = {
   Legendary: 12,
   Mythic: 25,
   Divine: 100,
+  Celestial: 500,
 };
 
 const NORMAL_RARITY_WEIGHTS: Array<{ rarity: CardRarity; weight: number }> = [
@@ -150,12 +158,12 @@ const PITY_REWARDS: PityReward[] = [
 ];
 
 const CRATE_CARD_POOLS: Record<PackTier, JjkCard[]> = {
-  common: ALL_CARDS,
-  super: ALL_CARDS,
-  divine: ALL_CARDS,
-  serpent: ALL_CARDS,
+  common: CORE_CARDS,
+  super: CORE_CARDS,
+  divine: CORE_CARDS,
+  serpent: CORE_CARDS,
   tybw: BLEACH_CARDS,
-  celestial: ALL_CARDS,
+  celestial: CORE_CARDS,
 };
 
 const GENERATION_RULES: Record<
@@ -245,7 +253,7 @@ const commandData = [
     .setDescription("View your Anime Coins and spin balance"),
   new SlashCommandBuilder()
     .setName("daily")
-    .setDescription("Claim 30 Anime Coins once per day"),
+    .setDescription("Claim 10 normal spins once per day"),
   new SlashCommandBuilder()
     .setName("claim_spin_normal")
     .setDescription("Claim 20 coins and 10 normal spins every day"),
@@ -291,6 +299,18 @@ const commandData = [
     .setName("leaderboard")
     .setDescription("Rank players by wins, collection value, and card power"),
   new SlashCommandBuilder()
+    .setName("banner")
+    .setDescription("View the Starlight Envy crossover banner or spend Fragment of Soul")
+    .addIntegerOption((option) =>
+      option
+        .setName("spins")
+        .setDescription("Choose 1 spin or a guaranteed 10-spin")
+        .addChoices({ name: "1 spin · 1 Fragment", value: 1 }, { name: "10 spins · 10 Fragments", value: 10 }),
+    ),
+  new SlashCommandBuilder()
+    .setName("missions")
+    .setDescription("View and claim your daily missions"),
+  new SlashCommandBuilder()
     .setName("help")
     .setDescription("See all available card game commands"),
 ].map((command) => command.toJSON());
@@ -321,7 +341,7 @@ function rarityValue(rarity: CardRarity): number {
 }
 
 function chooseCard(
-  cards: JjkCard[] = ALL_CARDS,
+  cards: JjkCard[] = CORE_CARDS,
   weights: Array<{ rarity: CardRarity; weight: number }> = NORMAL_RARITY_WEIGHTS,
 ): JjkCard {
   const totalWeight = weights.reduce((sum, entry) => sum + entry.weight, 0);
@@ -357,11 +377,12 @@ function battleScore(card: JjkCard): number {
 }
 
 function cardEmbed(card: JjkCard, title?: string, ownership?: string) {
+  const source = card.banner ? `\n🏷️ **Source:** ${card.banner}` : "";
   return new EmbedBuilder()
     .setColor(RARITY_COLORS[card.rarity])
     .setTitle(title ?? `🎴 ${card.name.toUpperCase()}`)
     .setDescription(
-      `${card.anime}\n\n${RARITY_SYMBOLS[card.rarity]} **${card.rarity.toUpperCase()}**${
+      `${card.anime}${source}\n\n${RARITY_SYMBOLS[card.rarity]} **${card.rarity.toUpperCase()}**${
         ownership ? `\n\n${ownership}` : ""
       }`,
     )
@@ -409,6 +430,213 @@ async function cardMedia(
     logger.warn({ err: error, cardId: card.id }, "Could not attach card image");
     return { embed, files: [] };
   }
+}
+
+
+function missionDateKey(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+async function ensureDailyMission(discordUserId: string, now = new Date()) {
+  const missionDate = missionDateKey(now);
+  await db.insert(jjkDailyMissions).values({ discordUserId, missionDate }).onConflictDoNothing();
+  const [mission] = await db.select().from(jjkDailyMissions).where(and(
+    eq(jjkDailyMissions.discordUserId, discordUserId),
+    eq(jjkDailyMissions.missionDate, missionDate),
+  )).limit(1);
+  if (!mission) throw new Error("DAILY_MISSION_NOT_FOUND");
+  return mission;
+}
+
+async function incrementMessageMission(discordUserId: string): Promise<void> {
+  const now = new Date();
+  const missionDate = missionDateKey(now);
+  await db.insert(jjkDailyMissions).values({ discordUserId, missionDate, messagesSent: 1 }).onConflictDoUpdate({
+    target: [jjkDailyMissions.discordUserId, jjkDailyMissions.missionDate],
+    set: { messagesSent: sql`${jjkDailyMissions.messagesSent} + 1`, updatedAt: now },
+  });
+}
+
+async function startVoiceMission(discordUserId: string): Promise<void> {
+  const now = new Date();
+  const mission = await ensureDailyMission(discordUserId, now);
+  if (mission.voiceStartedAt) return;
+  await db.update(jjkDailyMissions).set({ voiceStartedAt: now, updatedAt: now }).where(and(
+    eq(jjkDailyMissions.discordUserId, discordUserId),
+    eq(jjkDailyMissions.missionDate, missionDateKey(now)),
+  ));
+}
+
+async function refreshVoiceMission(discordUserId: string, now = new Date()): Promise<void> {
+  const mission = await ensureDailyMission(discordUserId, now);
+  if (!mission.voiceStartedAt) return;
+  const elapsedMinutes = Math.floor((now.getTime() - mission.voiceStartedAt.getTime()) / 60_000);
+  if (elapsedMinutes <= 0) return;
+  await db.update(jjkDailyMissions).set({
+    voiceMinutes: sql`${jjkDailyMissions.voiceMinutes} + ${elapsedMinutes}`,
+    voiceStartedAt: now,
+    updatedAt: now,
+  }).where(and(
+    eq(jjkDailyMissions.discordUserId, discordUserId),
+    eq(jjkDailyMissions.missionDate, missionDateKey(now)),
+  ));
+}
+
+async function finishVoiceMission(discordUserId: string): Promise<void> {
+  const now = new Date();
+  const mission = await ensureDailyMission(discordUserId, now);
+  const elapsedMinutes = mission.voiceStartedAt ? Math.floor((now.getTime() - mission.voiceStartedAt.getTime()) / 60_000) : 0;
+  await db.update(jjkDailyMissions).set({
+    voiceMinutes: sql`${jjkDailyMissions.voiceMinutes} + ${Math.max(0, elapsedMinutes)}`,
+    voiceStartedAt: null,
+    updatedAt: now,
+  }).where(and(
+    eq(jjkDailyMissions.discordUserId, discordUserId),
+    eq(jjkDailyMissions.missionDate, missionDateKey(now)),
+  ));
+}
+
+async function missionSnapshot(discordUserId: string) {
+  const now = new Date();
+  await refreshVoiceMission(discordUserId, now);
+  const mission = await ensureDailyMission(discordUserId, now);
+  const liveMinutes = mission.voiceStartedAt ? Math.floor((now.getTime() - mission.voiceStartedAt.getTime()) / 60_000) : 0;
+  return { ...mission, voiceMinutes: mission.voiceMinutes + Math.max(0, liveMinutes) };
+}
+
+async function claimDailyMissions(discordUserId: string) {
+  await refreshVoiceMission(discordUserId);
+  const missionDate = missionDateKey();
+  const claimed: string[] = [];
+  await db.transaction(async (tx) => {
+    const messageClaim = await tx.update(jjkDailyMissions).set({ messagesClaimed: true, updatedAt: new Date() }).where(and(
+      eq(jjkDailyMissions.discordUserId, discordUserId),
+      eq(jjkDailyMissions.missionDate, missionDate),
+      eq(jjkDailyMissions.messagesClaimed, false),
+      gte(jjkDailyMissions.messagesSent, MISSION_MESSAGES_TARGET),
+    )).returning({ discordUserId: jjkDailyMissions.discordUserId });
+    if (messageClaim.length > 0) {
+      claimed.push("35 messages (+5 Fragment of Soul)");
+      await tx.update(jjkPlayers).set({ fragmentOfSoul: sql`${jjkPlayers.fragmentOfSoul} + 5`, updatedAt: new Date() }).where(eq(jjkPlayers.discordUserId, discordUserId));
+    }
+    const voiceClaim = await tx.update(jjkDailyMissions).set({ voiceClaimed: true, updatedAt: new Date() }).where(and(
+      eq(jjkDailyMissions.discordUserId, discordUserId),
+      eq(jjkDailyMissions.missionDate, missionDate),
+      eq(jjkDailyMissions.voiceClaimed, false),
+      gte(jjkDailyMissions.voiceMinutes, MISSION_VOICE_TARGET_MINUTES),
+    )).returning({ discordUserId: jjkDailyMissions.discordUserId });
+    if (voiceClaim.length > 0) {
+      claimed.push("10 voice minutes (+10 Fragment of Soul)");
+      await tx.update(jjkPlayers).set({ fragmentOfSoul: sql`${jjkPlayers.fragmentOfSoul} + 10`, updatedAt: new Date() }).where(eq(jjkPlayers.discordUserId, discordUserId));
+    }
+  });
+  return { claimed, mission: await missionSnapshot(discordUserId) };
+}
+
+
+function bannerEmbed(banner: BannerDefinition): EmbedBuilder {
+  const groups = new Map<string, JjkCard[]>();
+  for (const card of banner.cards) {
+    const group = groups.get(card.anime) ?? [];
+    group.push(card);
+    groups.set(card.anime, group);
+  }
+  const embed = new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setTitle(`🌌 ${banner.name} · ${banner.source} Banner`)
+    .setDescription(`Spend ${banner.costPerSpin} Fragment of Soul per spin. Use /banner spins:1 or /banner spins:10. A 10-spin guarantees at least one Legendary-or-higher card.`)
+    .setImage(banner.image_url)
+    .addFields({ name: "Odds", value: "Epic 45% · Legendary 10% · Mythic 30% · Divine 10% · Celestial 5%", inline: false });
+  for (const [franchise, cards] of groups) {
+    embed.addFields({
+      name: franchise,
+      value: cards.map((card) => `${card.name} · ${card.rarity} · ${card.power} · ID: ${card.id}`).join("\n"),
+      inline: false,
+    });
+  }
+  return embed.setFooter({ text: "37 crossover cards · Celestial is the rarest rarity" });
+}
+
+function isLegendaryOrHigher(card: JjkCard): boolean {
+  return ["Legendary", "Mythic", "Divine", "Celestial"].includes(card.rarity);
+}
+
+function chooseBannerCard(banner: BannerDefinition): JjkCard {
+  return chooseCard(banner.cards, banner.odds);
+}
+
+function chooseBannerHighRarityCard(banner: BannerDefinition): JjkCard {
+  return chooseCard(banner.cards, [
+    { rarity: "Legendary", weight: 10 },
+    { rarity: "Mythic", weight: 30 },
+    { rarity: "Divine", weight: 10 },
+    { rarity: "Celestial", weight: 5 },
+  ]);
+}
+
+async function performBannerSpins(discordUserId: string, count: 1 | 10) {
+  return db.transaction(async (tx) => {
+    const [updated] = await tx.update(jjkPlayers).set({
+      fragmentOfSoul: sql`${jjkPlayers.fragmentOfSoul} - ${count}`,
+      pulls: sql`${jjkPlayers.pulls} + ${count}`,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(jjkPlayers.discordUserId, discordUserId),
+      gte(jjkPlayers.fragmentOfSoul, count),
+    )).returning({ fragmentOfSoul: jjkPlayers.fragmentOfSoul });
+    if (!updated) return undefined;
+    const cards = Array.from({ length: count }, () => chooseBannerCard(CROSSOVER_BANNER));
+    if (count === 10 && !cards.some(isLegendaryOrHigher)) {
+      cards[cards.length - 1] = chooseBannerHighRarityCard(CROSSOVER_BANNER);
+    }
+    for (const card of cards) await addCard(tx, discordUserId, card.id);
+    return { cards, fragmentOfSoul: updated.fragmentOfSoul };
+  });
+}
+
+async function handleBanner(interaction: ChatInputCommandInteraction) {
+  const requestedSpins = interaction.options.getInteger("spins");
+  if (requestedSpins === null) {
+    await interaction.reply({ embeds: [bannerEmbed(CROSSOVER_BANNER)] });
+    return;
+  }
+  if (requestedSpins !== 1 && requestedSpins !== 10) {
+    await interaction.reply({ content: "Choose either 1 spin or 10 spins.", ephemeral: true });
+    return;
+  }
+  if (!(await requirePlayer(interaction))) return;
+  await interaction.deferReply();
+  const result = await performBannerSpins(interaction.user.id, requestedSpins);
+  if (!result) {
+    await interaction.editReply({ content: `You need ${requestedSpins} Fragment of Soul to spin this banner.` });
+    return;
+  }
+  const media = await Promise.all(result.cards.map((card, index) =>
+    cardMedia(card, `🌌 ${CROSSOVER_BANNER.name} · Pull ${index + 1}`, `Source: ${CROSSOVER_BANNER.source}`, index),
+  ));
+  await interaction.editReply({
+    content: `Starlight Envy complete: ${requestedSpins} pull(s). Fragment of Soul remaining: **${result.fragmentOfSoul}**.`,
+    embeds: media.map(({ embed }) => embed),
+    files: media.flatMap(({ files }) => files),
+  });
+}
+
+async function handleMissions(interaction: ChatInputCommandInteraction) {
+  if (!(await requirePlayer(interaction))) return;
+  const result = await claimDailyMissions(interaction.user.id);
+  const player = await getPlayer(interaction.user.id);
+  const claimedText = result.claimed.length > 0 ? `\n\nClaimed now: ${result.claimed.join(" · ")}` : "";
+  await interaction.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("📜 Daily Missions")
+      .setDescription(`Resets at 00:00 UTC.${claimedText}`)
+      .addFields(
+        { name: `Send ${MISSION_MESSAGES_TARGET} messages`, value: `${Math.min(result.mission.messagesSent, MISSION_MESSAGES_TARGET)}/${MISSION_MESSAGES_TARGET} · Reward: 5 Fragment of Soul${result.mission.messagesClaimed ? " · Claimed" : ""}`, inline: false },
+        { name: `Stay in voice for ${MISSION_VOICE_TARGET_MINUTES} minutes`, value: `${Math.min(result.mission.voiceMinutes, MISSION_VOICE_TARGET_MINUTES)}/${MISSION_VOICE_TARGET_MINUTES} minutes · Reward: 10 Fragment of Soul${result.mission.voiceClaimed ? " · Claimed" : ""}`, inline: false },
+        { name: "Fragment of Soul", value: `${player?.fragmentOfSoul ?? 0}`, inline: true },
+      )],
+  });
 }
 
 function buttonRow(buttons: ButtonBuilder[]): ActionRowBuilder<ButtonBuilder> {
@@ -606,7 +834,7 @@ function pityProgressText(summonCount: number): string {
 
 function randomCardOfRarity(
   rarity: CardRarity,
-  cards: JjkCard[] = ALL_CARDS,
+  cards: JjkCard[] = CORE_CARDS,
 ): JjkCard {
   return chooseCard(cards.filter((card) => card.rarity === rarity), [
     { rarity, weight: 1 },
@@ -944,6 +1172,7 @@ async function handleBalance(interaction: ChatInputCommandInteraction) {
         .addFields(
           { name: "Anime Coins", value: `${player.coins}`, inline: true },
           { name: "Normal spins", value: `${player.normalSpins}`, inline: true },
+          { name: "Fragment of Soul", value: `${player.fragmentOfSoul}`, inline: true },
         )
         .setFooter({
           text: `Summon pity: ${pityProgressText(player.summonCount)} · Use /summon to draw.`,
@@ -965,7 +1194,7 @@ async function claimTimedReward(
   const update =
     kind === "daily"
       ? {
-          coins: sql`${jjkPlayers.coins} + ${DAILY_REWARD}`,
+          normalSpins: sql`${jjkPlayers.normalSpins} + ${DAILY_CLAIM_SPINS}`,
           lastDailyAt: now,
           updatedAt: now,
         }
@@ -1017,10 +1246,12 @@ async function claimTimedReward(
   }
   const rewardText =
     kind === "daily"
-      ? `**${DAILY_REWARD} Anime Coins**`
+      ? `**${DAILY_CLAIM_SPINS} normal spins**`
       : `**${kind === "normal" ? NORMAL_SPIN_REWARD : HOURLY_SPIN_REWARD} Anime Coins** and **${kind === "normal" ? NORMAL_SPINS_PER_CLAIM : HOURLY_SPINS_PER_CLAIM} normal spin(s)**`;
   await interaction.reply({
-    content: `Reward claimed: ${rewardText}. Balance: **${updated.coins} coins**.`,
+    content: kind === "daily"
+      ? `Reward claimed: ${rewardText}. Normal spins: **${updated.normalSpins}**.`
+      : `Reward claimed: ${rewardText}. Balance: **${updated.coins} coins**.`,
   });
 }
 
@@ -1157,6 +1388,7 @@ async function handleProfile(interaction: ChatInputCommandInteraction) {
           { name: "Anime Coins", value: `${player.coins}`, inline: true },
           { name: "Pulls", value: `${player.pulls}`, inline: true },
           { name: "Normal spins", value: `${player.normalSpins}`, inline: true },
+          { name: "Fragment of Soul", value: `${player.fragmentOfSoul}`, inline: true },
           { name: "Summon pity", value: pityProgressText(player.summonCount), inline: false },
           { name: "Unique cards", value: `${cards.length}`, inline: true },
           { name: "Total cards", value: `${totalCards}`, inline: true },
@@ -1857,12 +2089,13 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
         .setTitle("🎴 Anime Card Game")
         .setDescription("Collect anime cards, generate higher rarities, trade duplicates, and battle other players.")
         .addFields(
-          { name: "Account", value: "`/start` · `/balance` · `/profile` · `/daily`", inline: false },
+          { name: "Account", value: "`/start` · `/balance` · `/profile` · `/daily` · `/missions`", inline: false },
           { name: "Cards", value: "`/summon` · `/pack` · `/collection` · `/card` · `/sell_card` · `/generate`", inline: false },
+          { name: "Crossover", value: "`/banner` · Starlight Envy · 37 new cards", inline: false },
           { name: "Rewards", value: "`/claim_spin_normal` · `/hourly_claim_spin_normal` · `/shop_spins`", inline: false },
           { name: "Multiplayer", value: "`/battle @user` · `/trade @user` · `/leaderboard`", inline: false },
         )
-        .setFooter({ text: "Current pool: 23 Jujutsu Kaisen + Bleach cards." }),
+        .setFooter({ text: "Core pool: 23 Jujutsu Kaisen + Bleach cards · Crossover: 37 Starlight Envy cards." }),
     ],
   });
 }
@@ -1870,7 +2103,9 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
 export async function startDiscordBot(): Promise<Client> {
   const token = process.env.DISCORD_BOT_TOKEN;
   if (!token) throw new Error("DISCORD_BOT_TOKEN is required to start the Discord bot.");
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildVoiceStates],
+  });
 
   client.once(Events.ClientReady, (readyClient) => {
     logger.info(
@@ -1880,6 +2115,23 @@ export async function startDiscordBot(): Promise<Client> {
     void registerCommands(readyClient.user.id).catch((error) => {
       logger.error({ err: error }, "Failed to register Discord slash commands");
     });
+  });
+
+  client.on(Events.MessageCreate, (message) => {
+    if (message.author.bot || !message.guild) return;
+    void incrementMessageMission(message.author.id).catch((error) => {
+      logger.warn({ err: error, userId: message.author.id }, "Failed to record message mission progress");
+    });
+  });
+
+  client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+    const userId = newState.id || oldState.id;
+    if (newState.member?.user.bot || oldState.member?.user.bot) return;
+    if (!oldState.channelId && newState.channelId) {
+      void startVoiceMission(userId).catch((error) => logger.warn({ err: error, userId }, "Failed to start voice mission"));
+    } else if (oldState.channelId && !newState.channelId) {
+      void finishVoiceMission(userId).catch((error) => logger.warn({ err: error, userId }, "Failed to finish voice mission"));
+    }
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
@@ -1974,6 +2226,12 @@ export async function startDiscordBot(): Promise<Client> {
           break;
         case "leaderboard":
           await handleLeaderboard(interaction);
+          break;
+        case "banner":
+          await handleBanner(interaction);
+          break;
+        case "missions":
+          await handleMissions(interaction);
           break;
         case "help":
           await handleHelp(interaction);
