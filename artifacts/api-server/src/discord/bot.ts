@@ -546,7 +546,7 @@ function bannerEmbed(banner: BannerDefinition): EmbedBuilder {
     .setTitle(`🌌 ${banner.name} · ${banner.source} Banner`)
     .setDescription(`Spend ${banner.costPerSpin} Fragment of Soul per spin. Use /banner spins:1 or /banner spins:10. A 10-spin guarantees at least one Legendary-or-higher card.`)
     .setImage(banner.image_url)
-    .addFields({ name: "Odds", value: "Epic 45% · Legendary 10% · Mythic 30% · Divine 10% · Celestial 5%", inline: false });
+    .addFields({ name: "Odds", value: "Epic 48% · Legendary 45% · Divine 5% · Celestial 2%", inline: false });
   for (const [franchise, cards] of groups) {
     embed.addFields({
       name: franchise,
@@ -567,10 +567,9 @@ function chooseBannerCard(banner: BannerDefinition): JjkCard {
 
 function chooseBannerHighRarityCard(banner: BannerDefinition): JjkCard {
   return chooseCard(banner.cards, [
-    { rarity: "Legendary", weight: 10 },
-    { rarity: "Mythic", weight: 30 },
-    { rarity: "Divine", weight: 10 },
-    { rarity: "Celestial", weight: 5 },
+    { rarity: "Legendary", weight: 45 },
+    { rarity: "Divine", weight: 5 },
+    { rarity: "Celestial", weight: 2 },
   ]);
 }
 
