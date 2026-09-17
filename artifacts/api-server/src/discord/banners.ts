@@ -22,13 +22,12 @@ export const CROSSOVER_BANNER: BannerDefinition = {
   image_url: "https://i.ibb.co/84mBN6RH/images-2026-09-15-T193921-541.jpg",
   costPerSpin: 1,
   cards: CROSSOVER_CARDS,
-  // The supplied odds leave 10% for Legendary, which completes the hierarchy.
+  // Banner odds: Epic 48%, Legendary 45%, Divine 5%, Celestial 2%.
   odds: [
-    { rarity: "Epic", weight: 45 },
-    { rarity: "Legendary", weight: 10 },
-    { rarity: "Mythic", weight: 30 },
-    { rarity: "Divine", weight: 10 },
-    { rarity: "Celestial", weight: 5 },
+    { rarity: "Epic", weight: 48 },
+    { rarity: "Legendary", weight: 45 },
+    { rarity: "Divine", weight: 5 },
+    { rarity: "Celestial", weight: 2 },
   ],
 };
 
