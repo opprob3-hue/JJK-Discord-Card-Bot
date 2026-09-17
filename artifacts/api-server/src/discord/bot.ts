@@ -52,6 +52,7 @@ import {
   type JjkCard,
 } from "./cards";
 import { CROSSOVER_BANNER, type BannerDefinition } from "./banners";
+import { answerGameQuestion } from "./assistant";
 
 const STARTING_COINS = 100;
 const STARTER_CARD_COUNT = 3;
@@ -310,6 +311,16 @@ const commandData = [
   new SlashCommandBuilder()
     .setName("missions")
     .setDescription("View and claim your daily missions"),
+  new SlashCommandBuilder()
+    .setName("guide")
+    .setDescription("Ask the AI assistant about cards, commands, odds, and rules")
+    .addStringOption((option) =>
+      option
+        .setName("question")
+        .setDescription("Your game question")
+        .setRequired(true)
+        .setMaxLength(500),
+    ),
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("See all available card game commands"),
@@ -2084,6 +2095,23 @@ async function registerCommands(applicationId: string): Promise<void> {
   logger.info({ scope: guildId ? "guild" : "global" }, "Discord slash commands registered");
 }
 
+async function handleGuide(interaction: ChatInputCommandInteraction) {
+  const question = interaction.options.getString("question", true).trim();
+  if (!question) {
+    await interaction.reply({ content: "Please enter a question for the game assistant.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const answer = await answerGameQuestion(question);
+    await interaction.editReply({ content: answer });
+  } catch (error) {
+    logger.error({ err: error, userId: interaction.user.id }, "Game assistant command failed");
+    await interaction.editReply({ content: "The game assistant is temporarily unavailable. Please try /help or try again shortly." });
+  }
+}
+
 async function handleHelp(interaction: ChatInputCommandInteraction) {
   await interaction.reply({
     embeds: [
@@ -2097,6 +2125,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
           { name: "Crossover", value: "`/banner` · Starlight Envy · 37 new cards", inline: false },
           { name: "Rewards", value: "`/claim_spin_normal` · `/hourly_claim_spin_normal` · `/shop_spins`", inline: false },
           { name: "Multiplayer", value: "`/battle @user` · `/trade @user` · `/leaderboard`", inline: false },
+          { name: "Assistant", value: "`/guide question:<your question>` · Ask about cards, commands, odds, and rules.", inline: false },
         )
         .setFooter({ text: "Core pool: 23 Jujutsu Kaisen + Bleach cards · Crossover: 37 Starlight Envy cards." }),
     ],
@@ -2248,6 +2277,9 @@ export async function startDiscordBot(): Promise<Client> {
           break;
         case "missions":
           await handleMissions(interaction);
+          break;
+        case "guide":
+          await handleGuide(interaction);
           break;
         case "help":
           await handleHelp(interaction);
