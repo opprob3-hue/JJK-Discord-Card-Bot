@@ -623,10 +623,11 @@ async function handleBanner(interaction: ChatInputCommandInteraction) {
 
 async function handleMissions(interaction: ChatInputCommandInteraction) {
   if (!(await requirePlayer(interaction))) return;
+  await interaction.deferReply();
   const result = await claimDailyMissions(interaction.user.id);
   const player = await getPlayer(interaction.user.id);
   const claimedText = result.claimed.length > 0 ? `\n\nClaimed now: ${result.claimed.join(" · ")}` : "";
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [new EmbedBuilder()
       .setColor(0x22c55e)
       .setTitle("📜 Daily Missions")
@@ -920,8 +921,9 @@ async function purchaseCards(
 }
 
 async function handleStart(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply();
   const result = await registerPlayer(interaction.user.id, interaction.user.username);
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [
       new EmbedBuilder()
         .setColor(0x22c55e)
@@ -942,12 +944,12 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
 async function handleSummon(interaction: ChatInputCommandInteraction) {
   const player = await requirePlayer(interaction);
   if (!player) return;
+  await interaction.deferReply();
   const result = await performSummon(interaction.user.id);
   if (!result) {
-    await interaction.reply({
+    await interaction.editReply({
       content:
         "You do not have any normal spins. Use `/claim_spin_normal` daily or `/hourly_claim_spin_normal` each hour.",
-      ephemeral: true,
     });
     return;
   }
@@ -967,7 +969,7 @@ async function handleSummon(interaction: ChatInputCommandInteraction) {
     result.pityCards.length > 0
       ? `\n\nPity reward(s): ${result.pityCards.map(({ reward }) => reward.label).join(", ")}`
       : "";
-  await interaction.reply({
+  await interaction.editReply({
     content: `✨ Summon complete. Normal spins left: **${result.normalSpins}**.\nPity: ${pityProgressText(result.summonCount)}${pityText}`,
     embeds: media.map(({ embed }) => embed),
     files: media.flatMap(({ files }) => files),
@@ -997,15 +999,15 @@ async function handlePack(interaction: ChatInputCommandInteraction) {
 
 async function handleCollection(interaction: ChatInputCommandInteraction) {
   if (!(await requirePlayer(interaction))) return;
+  await interaction.deferReply();
   const rows = await ownedCards(interaction.user.id);
   if (rows.length === 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "Your collection is empty. Use `/start` or `/pack` to get cards.",
-      ephemeral: true,
     });
     return;
   }
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [collectionEmbed(interaction.user, rows, 0)],
     components: collectionComponents(interaction.user.id, 0, rows.length),
   });
@@ -1034,8 +1036,9 @@ async function handleCard(interaction: ChatInputCommandInteraction) {
     owned && owned.quantity > 0
       ? `✅ You own **${owned.quantity}** copy/copies.`
       : "❌ You do not own this card yet.";
+  await interaction.deferReply();
   const media = await cardMedia(card, undefined, ownership);
-  await interaction.reply({ embeds: [media.embed], files: media.files });
+  await interaction.editReply({ embeds: [media.embed], files: media.files });
 }
 
 async function handleSellCard(interaction: ChatInputCommandInteraction) {
@@ -1051,6 +1054,7 @@ async function handleSellCard(interaction: ChatInputCommandInteraction) {
     return;
   }
   const value = rarityValue(card.rarity) * quantity;
+  await interaction.deferReply();
   const result = await db.transaction(async (tx) => {
     const removed = await tx
       .update(jjkPlayerCards)
@@ -1084,19 +1088,19 @@ async function handleSellCard(interaction: ChatInputCommandInteraction) {
     return player;
   });
   if (!result) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `You do not own ${quantity} ${card.name} card(s).`,
-      ephemeral: true,
     });
     return;
   }
-  await interaction.reply({
+  await interaction.editReply({
     content: `Sold **${quantity}× ${card.name}** for **${value} Anime Coins**. Balance: **${result.coins}**.`,
   });
 }
 
 async function handleGenerate(interaction: ChatInputCommandInteraction) {
   if (!(await requirePlayer(interaction))) return;
+  await interaction.deferReply();
   const sourceRarity = interaction.options.getString(
     "rarity",
     true,
@@ -1108,9 +1112,8 @@ async function handleGenerate(interaction: ChatInputCommandInteraction) {
   );
   const ownedCount = sourceRows.reduce((sum, row) => sum + row.quantity, 0);
   if (ownedCount < rule.required) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `You need **${rule.required} ${sourceRarity} cards** to generate one ${rule.target}. You currently have ${ownedCount}.`,
-      ephemeral: true,
     });
     return;
   }
@@ -1154,7 +1157,7 @@ async function handleGenerate(interaction: ChatInputCommandInteraction) {
     `🔄 GENERATED ${generatedCard.rarity.toUpperCase()} CARD`,
     `Consumed ${rule.required} ${sourceRarity} cards.`,
   );
-  await interaction.reply({
+  await interaction.editReply({
     content: `You generated **${generatedCard.name}**. This did not affect summon pity.`,
     embeds: [media.embed],
     files: media.files,
@@ -1187,6 +1190,7 @@ async function claimTimedReward(
 ) {
   const player = await requirePlayer(interaction);
   if (!player) return;
+  await interaction.deferReply();
   const now = new Date();
   const cutoff = new Date(
     now.getTime() - (kind === "hourly" ? HOUR_MS : DAY_MS),
@@ -1238,9 +1242,8 @@ async function claimTimedReward(
           ? player.lastNormalSpinClaimAt
           : player.lastHourlySpinClaimAt;
     const waitMs = Math.max(0, (lastClaim?.getTime() ?? now.getTime()) + (kind === "hourly" ? HOUR_MS : DAY_MS) - now.getTime());
-    await interaction.reply({
+    await interaction.editReply({
       content: `Already claimed. Try again in ${Math.ceil(waitMs / 60_000)} minute(s).`,
-      ephemeral: true,
     });
     return;
   }
@@ -1248,7 +1251,7 @@ async function claimTimedReward(
     kind === "daily"
       ? `**${DAILY_CLAIM_SPINS} normal spins**`
       : `**${kind === "normal" ? NORMAL_SPIN_REWARD : HOURLY_SPIN_REWARD} Anime Coins** and **${kind === "normal" ? NORMAL_SPINS_PER_CLAIM : HOURLY_SPINS_PER_CLAIM} normal spin(s)**`;
-  await interaction.reply({
+  await interaction.editReply({
     content: kind === "daily"
       ? `Reward claimed: ${rewardText}. Normal spins: **${updated.normalSpins}**.`
       : `Reward claimed: ${rewardText}. Balance: **${updated.coins} coins**.`,
@@ -1333,6 +1336,7 @@ async function handleShopPurchase(
   tier: PackTier,
 ) {
   if (!(await requirePlayer(interaction))) return;
+  await interaction.deferReply();
   const config: Record<PackTier, { cost: number; count: number; label: string }> = {
     common: { cost: 10, count: 5, label: "Common Crate" },
     super: { cost: 30, count: 5, label: "Super Crate" },
@@ -1347,9 +1351,8 @@ async function handleShopPurchase(
   );
   const remainingCoins = await purchaseCards(interaction.user.id, cards, selected.cost);
   if (remainingCoins === undefined) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `You need ${selected.cost} Anime Coins for that crate.`,
-      ephemeral: true,
     });
     return;
   }
@@ -1358,11 +1361,10 @@ async function handleShopPurchase(
       cardMedia(card, `🎴 Pull ${index + 1}: ${card.name.toUpperCase()}`, undefined, index),
     ),
   );
-  await interaction.reply({
+  await interaction.editReply({
     content: `You opened the **${selected.label}**. Balance: **${remainingCoins} coins**.`,
     embeds: media.map(({ embed }) => embed),
     files: media.flatMap(({ files }) => files),
-    ephemeral: false,
   });
 }
 
@@ -1376,9 +1378,10 @@ async function handleProfile(interaction: ChatInputCommandInteraction) {
     });
     return;
   }
+  await interaction.deferReply();
   const cards = await ownedCards(target.id);
   const totalCards = cards.reduce((sum, row) => sum + row.quantity, 0);
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [
       new EmbedBuilder()
         .setColor(0x7c3aed)
@@ -1399,6 +1402,7 @@ async function handleProfile(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleLeaderboard(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply();
   const players = await db.select().from(jjkPlayers);
   const cards = await db.select().from(jjkPlayerCards);
   const stats = players
@@ -1430,7 +1434,7 @@ async function handleLeaderboard(interaction: ChatInputCommandInteraction) {
           )
           .join("\n")
       : "No registered players yet.";
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [
       new EmbedBuilder()
         .setColor(0xf59e0b)
@@ -2143,6 +2147,8 @@ export async function startDiscordBot(): Promise<Client> {
       if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith("trade-qty:")) {
           await handleTradeModal(interaction);
+        } else {
+          await interaction.reply({ content: "That form is no longer active. Please start the trade again.", ephemeral: true });
         }
         return;
       }
@@ -2151,11 +2157,22 @@ export async function startDiscordBot(): Promise<Client> {
           await handleBattleSelect(interaction);
         } else if (interaction.customId.startsWith("trade-select:")) {
           await handleTradeSelect(interaction);
+        } else {
+          await interaction.reply({ content: "That card selector is no longer active. Please start the action again.", ephemeral: true });
         }
         return;
       }
       if (interaction.isButton()) {
         const parts = interaction.customId.split(":");
+        const knownButton =
+          parts[0] === "collection" ||
+          (parts[0] === "shop" && parts[1] in CRATE_WEIGHTS) ||
+          parts[0] === "battle" ||
+          parts[0] === "trade";
+        if (!knownButton) {
+          await interaction.reply({ content: "That button is no longer active. Please start the action again.", ephemeral: true });
+          return;
+        }
         if (parts[0] === "collection") {
           if (interaction.user.id !== parts[1]) {
             await interaction.reply({ content: "That collection page is not yours.", ephemeral: true });
@@ -2240,14 +2257,22 @@ export async function startDiscordBot(): Promise<Client> {
           await interaction.reply({ content: "That command is not available.", ephemeral: true });
       }
     })().catch(async (error: unknown) => {
-      logger.error({ err: error }, "Discord interaction failed");
-      if (interaction.isRepliable()) {
-        const content = "Something went wrong while handling that command. Please try again.";
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({ content, ephemeral: true }).catch(() => {});
-        } else {
-          await interaction.reply({ content, ephemeral: true }).catch(() => {});
+      logger.error({ err: error, interactionId: interaction.id }, "Discord interaction failed");
+      try {
+        if (interaction.isAutocomplete()) {
+          await interaction.respond([]);
+        } else if (interaction.isRepliable()) {
+          const content = "Something went wrong while handling that command. Please try again.";
+          if (interaction.deferred) {
+            await interaction.editReply({ content });
+          } else if (interaction.replied) {
+            await interaction.followUp({ content, ephemeral: true });
+          } else {
+            await interaction.reply({ content, ephemeral: true });
+          }
         }
+      } catch (responseError: unknown) {
+        logger.error({ err: responseError, interactionId: interaction.id }, "Failed to send Discord error response");
       }
     });
   });
