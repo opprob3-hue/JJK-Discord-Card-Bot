@@ -97,8 +97,8 @@ const SELL_VALUES: Record<CardRarity, number> = {
   Epic: 5,
   Legendary: 12,
   Mythic: 25,
-  Divine: 100,
-  Celestial: 500,
+  Divine: 50,
+  Celestial: 120,
 };
 
 const NORMAL_RARITY_WEIGHTS: Array<{ rarity: CardRarity; weight: number }> = [
@@ -273,7 +273,7 @@ const commandData = [
         .setDescription("Rarity of the cards to combine")
         .setRequired(true)
         .addChoices(
-          { name: "4 Epic → 1 Legendary", value: "Epic" },
+          { name: "8 Epic → 1 Legendary", value: "Epic" },
           { name: "3 Legendary → 1 Mythic", value: "Legendary" },
           { name: "6 Mythic → 1 Divine", value: "Mythic" },
         ),
